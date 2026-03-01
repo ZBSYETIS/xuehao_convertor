@@ -1,6 +1,5 @@
 import csv
 import os
-import re
 from pathlib import Path
 import uuid
 
@@ -67,39 +66,56 @@ def safe_replace_content(content, rules):
     """
     安全替换内容，使用占位符避免循环替换问题。
     
-    两阶段替换：
-    1. 将所有待替换内容 -> 唯一占位符
+    三阶段替换：
+    1. 将所有待替换内容 -> 唯一占位符 (记录替换类型)
     2. 将所有占位符 -> 最终目标值
     
-    支持双引号 "xxx" 和单引号 'xxx'
+    支持三种格式：
+    1. 双引号 "xxx"
+    2. 单引号 'xxx'
+    3. 无引号、逗号结尾 xxx,
     """
     if not rules:
         return content, False
     
-    placeholders = {}  # {占位符：(新值，引号类型)}
+    # 占位符映射：{占位符：(新值，格式类型)}
+    # 格式类型：'"' 双引号，"'" 单引号，',' 逗号结尾
+    placeholders = {}
     modified = False
     
     # ========== 第一阶段：原文本 -> 占位符 ==========
     for idx, (old_val, new_val) in enumerate(rules):
         placeholder = f"{PLACEHOLDER_PREFIX}{idx}__"
         
-        # 处理双引号 "xxx"
+        # 格式 1: 双引号 "xxx"
         search_str_double = f'"{old_val}"'
         if search_str_double in content:
             content = content.replace(search_str_double, placeholder)
             placeholders[placeholder] = (new_val, '"')
             modified = True
         
-        # 处理单引号 'xxx'
+        # 格式 2: 单引号 'xxx'
         search_str_single = f"'{old_val}'"
         if search_str_single in content:
             content = content.replace(search_str_single, placeholder)
             placeholders[placeholder] = (new_val, "'")
             modified = True
+        
+        # 格式 3: 无引号、逗号结尾 xxx,
+        search_str_comma = f'{old_val},'
+        if search_str_comma in content:
+            content = content.replace(search_str_comma, placeholder)
+            placeholders[placeholder] = (new_val, ',')
+            modified = True
     
     # ========== 第二阶段：占位符 -> 最终目标值 ==========
-    for placeholder, (new_val, quote_type) in placeholders.items():
-        replace_str = f'{quote_type}{new_val}{quote_type}'
+    for placeholder, (new_val, format_type) in placeholders.items():
+        if format_type == ',':
+            # 逗号结尾格式：新值 + 逗号
+            replace_str = f'{new_val},'
+        else:
+            # 引号格式：引号 + 新值 + 引号
+            replace_str = f'{format_type}{new_val}{format_type}'
         content = content.replace(placeholder, replace_str)
     
     return content, modified
