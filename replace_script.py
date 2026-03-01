@@ -1,6 +1,8 @@
 import csv
 import os
+import re
 from pathlib import Path
+import uuid
 
 # ================= 配置区域 =================
 SOURCE_DIR = Path('source')
@@ -9,6 +11,9 @@ CSV_FILE = Path('mapping.csv')
 
 # 编码尝试顺序 (根据实际文件编码调整，防止乱码)
 ENCODINGS = ['utf-8', 'gbk', 'gb18030', 'utf-8-sig']
+
+# 占位符前缀 (使用 UUID 确保唯一性，避免与原文冲突)
+PLACEHOLDER_PREFIX = f"__REPLACE_{uuid.uuid4().hex[:8]}_"
 # ===========================================
 
 def load_mapping(csv_path):
@@ -58,6 +63,47 @@ def read_file_content(file_path):
     with open(file_path, 'rb') as f:
         return f.read().decode('utf-8', errors='ignore'), 'utf-8 (forced)'
 
+def safe_replace_content(content, rules):
+    """
+    安全替换内容，使用占位符避免循环替换问题。
+    
+    两阶段替换：
+    1. 将所有待替换内容 -> 唯一占位符
+    2. 将所有占位符 -> 最终目标值
+    
+    支持双引号 "xxx" 和单引号 'xxx'
+    """
+    if not rules:
+        return content, False
+    
+    placeholders = {}  # {占位符：(新值，引号类型)}
+    modified = False
+    
+    # ========== 第一阶段：原文本 -> 占位符 ==========
+    for idx, (old_val, new_val) in enumerate(rules):
+        placeholder = f"{PLACEHOLDER_PREFIX}{idx}__"
+        
+        # 处理双引号 "xxx"
+        search_str_double = f'"{old_val}"'
+        if search_str_double in content:
+            content = content.replace(search_str_double, placeholder)
+            placeholders[placeholder] = (new_val, '"')
+            modified = True
+        
+        # 处理单引号 'xxx'
+        search_str_single = f"'{old_val}'"
+        if search_str_single in content:
+            content = content.replace(search_str_single, placeholder)
+            placeholders[placeholder] = (new_val, "'")
+            modified = True
+    
+    # ========== 第二阶段：占位符 -> 最终目标值 ==========
+    for placeholder, (new_val, quote_type) in placeholders.items():
+        replace_str = f'{quote_type}{new_val}{quote_type}'
+        content = content.replace(placeholder, replace_str)
+    
+    return content, modified
+
 def process_files(rules, rename_map):
     """
     主处理逻辑：内容替换 + 条件重命名
@@ -94,30 +140,15 @@ def process_files(rules, rename_map):
             
             # 2. 读取内容
             content, used_encoding = read_file_content(file_path)
-            original_content = content
             
-            # 3. 执行文本替换
-            # 规则：查找包裹引号的内容，例如 "20250101" 以及 包裹单引号的内容，例如 '20250101'
-            modified = False
-            for old_val, new_val in rules:
-                search_str = f'"{old_val}"'
-                replace_str = f'"{new_val}"'
-                
-                if search_str in content:
-                    content = content.replace(search_str, replace_str)
-                    modified = True
-                
-                search_str_single = f"'{old_val}'"
-                replace_str_single = f"'{new_val}'"
-                if search_str_single in content:
-                    content = content.replace(search_str_single, replace_str_single)
-                    modified = True
+            # 3. 执行文本替换 (使用安全的占位符替换)
+            content, modified = safe_replace_content(content, rules)
             
             # 4. 保存结果
             output_path = RESULT_DIR / new_filename
             
             # 检查结果文件夹中是否已存在同名文件（防止重命名冲突）
-            if output_path.exists() and output_path != file_path:
+            if output_path.exists() and str(output_path) != str(file_path):
                 print(f"[警告] 目标文件已存在，将被覆盖：{new_filename}")
             
             with open(output_path, 'w', encoding=used_encoding) as f:
@@ -131,6 +162,8 @@ def process_files(rules, rename_map):
 
         except Exception as e:
             print(f"[失败] {file_path.name}: {e}")
+            import traceback
+            traceback.print_exc()
 
     print("-" * 30)
     print(f"处理完成。成功处理：{success_count}/{len(files)}")
