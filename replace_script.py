@@ -97,7 +97,7 @@ def process_files(rules, rename_map):
             original_content = content
             
             # 3. 执行文本替换
-            # 规则：查找包裹引号的内容，例如 "20250101"
+            # 规则：查找包裹引号的内容，例如 "20250101" 以及 包裹单引号的内容，例如 '20250101'
             modified = False
             for old_val, new_val in rules:
                 search_str = f'"{old_val}"'
@@ -105,6 +105,12 @@ def process_files(rules, rename_map):
                 
                 if search_str in content:
                     content = content.replace(search_str, replace_str)
+                    modified = True
+                
+                search_str_single = f"'{old_val}'"
+                replace_str_single = f"'{new_val}'"
+                if search_str_single in content:
+                    content = content.replace(search_str_single, replace_str_single)
                     modified = True
             
             # 4. 保存结果
